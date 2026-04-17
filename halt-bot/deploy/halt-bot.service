@@ -1,0 +1,25 @@
+# Example systemd unit. Copy to /etc/systemd/system/halt-bot.service,
+# adjust paths, then: sudo systemctl daemon-reload && sudo systemctl enable --now halt-bot
+#
+# Omit User=/Group= or set to your deploy user.
+
+[Unit]
+Description=NASDAQ Halt Discord monitor
+Documentation=https://www.nasdaqtrader.com/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# User=haltbot
+# Group=haltbot
+WorkingDirectory=/opt/halt-bot
+EnvironmentFile=-/opt/halt-bot/.env
+ExecStart=/opt/halt-bot/.venv/bin/python -u /opt/halt-bot/main.py
+Restart=on-failure
+RestartSec=30
+TimeoutStopSec=45
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target
