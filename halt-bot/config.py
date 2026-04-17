@@ -28,11 +28,11 @@ def get_log_level() -> int:
 
 
 def get_poll_interval_seconds() -> int:
-    raw = os.getenv("POLL_INTERVAL_SECONDS", "20").strip()
+    raw = os.getenv("POLL_INTERVAL_SECONDS", "60").strip()
     try:
         n = int(raw)
     except ValueError:
-        return 20
+        return 60
     return max(10, min(n, 300))
 
 
