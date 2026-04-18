@@ -33,7 +33,7 @@ def get_poll_interval_seconds() -> int:
         n = int(raw)
     except ValueError:
         return 60
-    return max(10, min(n, 300))
+    return max(60, min(n, 300))
 
 
 def get_outside_window_sleep_seconds() -> int:

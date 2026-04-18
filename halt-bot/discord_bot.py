@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import pytz
@@ -31,6 +31,55 @@ def _fmt_et(dt: datetime | None) -> str:
     return dt.strftime("%Y-%m-%d %I:%M:%S %p %Z")
 
 
+def _to_et(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return ET.localize(dt)
+    return dt.astimezone(ET)
+
+
+def _fmt_et_time_only(dt: datetime | None) -> str:
+    """e.g. 3:28:25 PM ET (no leading zero on hour)."""
+    d = _to_et(dt)
+    if d is None:
+        return "—"
+    clock = d.strftime("%I:%M:%S %p")
+    if clock.startswith("0"):
+        clock = clock[1:]
+    return f"{clock} ET"
+
+
+def _truncate_text(s: str, max_len: int) -> str:
+    if len(s) <= max_len:
+        return s
+    if max_len < 1:
+        return ""
+    return s[: max_len - 1] + "…"
+
+
+def _format_halt_duration(
+    halt_time: datetime | None, resume_time: datetime | None
+) -> str:
+    if halt_time is None or resume_time is None:
+        return "—"
+    h = _to_et(halt_time)
+    r = _to_et(resume_time)
+    if h is None or r is None:
+        return "—"
+    delta: timedelta = r - h
+    secs = int(delta.total_seconds())
+    if secs < 0:
+        return "—"
+    m, s = divmod(secs, 60)
+    h_part, m = divmod(m, 60)
+    if h_part:
+        return f"{h_part}h {m}m {s}s"
+    if m:
+        return f"{m}m {s}s"
+    return f"{s}s"
+
+
 def _embed_color_new_halt(halt_code: str) -> int:
     c = halt_code.upper()
     if c in _SEVERE:
@@ -40,10 +89,10 @@ def _embed_color_new_halt(halt_code: str) -> int:
     return 0x808080
 
 
-def send_halt_alert(halt: dict[str, Any]) -> None:
+def send_halt_alert(halt: dict[str, Any], is_resumption: bool = False) -> None:
     """Post a Discord embed for a new halt or a resumption."""
     webhook = get_discord_webhook_url()
-    if halt.get("is_resumption"):
+    if is_resumption:
         embed = _build_resumption_embed(halt)
     else:
         embed = _build_new_halt_embed(halt)
@@ -94,14 +143,25 @@ def _build_new_halt_embed(halt: dict[str, Any]) -> dict[str, Any]:
 
 def _build_resumption_embed(halt: dict[str, Any]) -> dict[str, Any]:
     symbol = halt.get("symbol") or "?"
+    company = _truncate_text(str(halt.get("name") or "—"), 40)
+    halt_ts = halt.get("halt_time")
+    resume_ts = halt.get("resume_time")
     return {
         "title": f"✅ Trading Resumed — {symbol}",
         "color": 0x00B300,
         "fields": [
-            {"name": "Company", "value": str(halt.get("name") or "—"), "inline": False},
+            {"name": "Company", "value": company, "inline": False},
             {"name": "Exchange", "value": str(halt.get("market") or "—"), "inline": False},
-            {"name": "Resumed At", "value": _fmt_et(halt.get("resume_time")), "inline": False},
-            {"name": "Originally Halted", "value": _fmt_et(halt.get("halt_time")), "inline": False},
+            {"name": "⏱ Halted At", "value": _fmt_et_time_only(halt_ts), "inline": False},
+            {"name": "✅ Resumed At", "value": _fmt_et_time_only(resume_ts), "inline": False},
+            {
+                "name": "⏳ Halt Duration",
+                "value": _format_halt_duration(
+                    halt_ts if isinstance(halt_ts, datetime) else None,
+                    resume_ts if isinstance(resume_ts, datetime) else None,
+                ),
+                "inline": False,
+            },
         ],
         "footer": {"text": "NASDAQ Trader | Halt Monitor"},
     }

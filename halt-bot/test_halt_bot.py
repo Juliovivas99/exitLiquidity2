@@ -87,7 +87,6 @@ def run_discord_tests() -> int:
         "halt_code": "T1",
         "market": "NASDAQ",
         "pause_price": None,
-        "is_resumption": False,
     }
     resumption = {
         "halt_id": "test-halt-bot-resume",
@@ -98,13 +97,12 @@ def run_discord_tests() -> int:
         "halt_code": "T5",
         "market": "NASDAQ",
         "pause_price": None,
-        "is_resumption": True,
     }
 
     logger.info("Posting sample NEW HALT embed…")
-    send_halt_alert(new_halt)
+    send_halt_alert(new_halt, False)
     logger.info("Posting sample RESUMPTION embed…")
-    send_halt_alert(resumption)
+    send_halt_alert(resumption, True)
     logger.info("Done. Check your Discord channel for two test messages.")
     return 0
 
@@ -120,29 +118,28 @@ def run_discord_live_from_feed(halts: list[dict[str, Any]]) -> int:
         logger.error("%s", e)
         return 1
 
-    non_res = next((h for h in halts if not h.get("is_resumption")), None)
-    if non_res:
-        row = dict(non_res)
+    if halts:
+        row = dict(halts[0])
         logger.info(
-            "Posting LIVE RSS row (halt): %s — %s (same path as main.py)",
+            "Posting LIVE RSS row (new-halt embed): %s — %s",
             row.get("symbol"),
             row.get("halt_code"),
         )
-        send_halt_alert(row)
+        send_halt_alert(row, False)
     else:
-        logger.warning("No non-resumption rows in feed; skipped halt embed.")
+        logger.warning("No rows in feed; skipped halt embed.")
 
-    res = next((h for h in halts if h.get("is_resumption")), None)
+    res = next((h for h in halts if h.get("resume_time")), None)
     if res:
         row = dict(res)
         logger.info(
-            "Posting LIVE RSS row (resumption): %s — %s",
+            "Posting LIVE RSS row (resumption embed): %s — %s",
             row.get("symbol"),
             row.get("halt_code"),
         )
-        send_halt_alert(row)
+        send_halt_alert(row, True)
     else:
-        logger.info("No T5/MWCB resumption rows in current feed; skipped resumption embed.")
+        logger.info("No rows with resume_time in current feed; skipped resumption embed.")
 
     logger.info(
         "Done. These are current feed snapshots, not necessarily new halts since you last ran main.py."
