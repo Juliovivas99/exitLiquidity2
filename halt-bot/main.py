@@ -43,6 +43,24 @@ SESSION_END = dtime(16, 5)
 _shutdown = False
 
 
+def _event_key(halt: dict[str, Any]) -> str | None:
+    """
+    Build a stable identifier for a halt "event".
+
+    NASDAQ's RSS `entry.id` can change as fields (like resumption/ETA) update, which
+    causes duplicate "new halt" alerts if we dedupe on `halt_id`. Instead, we key
+    on the immutable parts: symbol + halt_time (+ market).
+    """
+    sym = halt.get("symbol")
+    ht = halt.get("halt_time")
+    if not sym or not isinstance(ht, datetime):
+        return None
+    # Normalize to ET for consistent string keys.
+    ht_et = ht.astimezone(ET) if ht.tzinfo else ET.localize(ht)
+    market = halt.get("market") or ""
+    return f"{sym}|{market}|{ht_et.isoformat(timespec='seconds')}"
+
+
 def _handle_shutdown(signum: int, frame: object | None) -> None:
     global _shutdown
     _shutdown = True
@@ -90,11 +108,11 @@ def _in_trading_window(now_et: datetime) -> bool:
 def _bootstrap_seen_ids(seen: dict[str, dict[str, Any]]) -> None:
     halts = fetch_halts()
     for h in halts:
-        hid = h.get("halt_id")
-        if hid:
-            seen[str(hid)] = h
+        ek = _event_key(h)
+        if ek:
+            seen[ek] = h
     logger.info(
-        "Startup: pre-loaded %s existing halts (by id). Monitoring for new halts and resume updates...",
+        "Startup: pre-loaded %s existing halts (by event key). Monitoring for new halts and resume updates...",
         len(seen),
     )
 
@@ -115,34 +133,33 @@ def _poll_cycle(seen_halts: dict[str, dict[str, Any]]) -> None:
             logger.debug("[SKIP] Stale halt from %s: %s", halt_date_et, sym)
             continue
 
-        hid = halt.get("halt_id")
-        if not hid:
+        ek = _event_key(halt)
+        if not ek:
             continue
-        sid = str(hid)
 
-        if sid not in seen_halts:
-            seen_halts[sid] = halt
+        if ek not in seen_halts:
+            seen_halts[ek] = halt
             try:
                 send_halt_alert(halt, is_resumption=False)
             except Exception:
-                logger.exception("send_halt_alert failed for %s", sid)
+                logger.exception("send_halt_alert failed for %s", ek)
             code = halt.get("halt_code", "?")
             logger.info("[%s] NEW HALT: %s — %s", stamp, sym, code)
             continue
 
-        prev = seen_halts[sid]
-        prev_resume = prev.get("resume_time")
-        curr_resume = halt.get("resume_time")
-        if prev_resume is None and curr_resume is not None:
-            seen_halts[sid] = halt
+        prev = seen_halts[ek]
+        prev_is_resumption = bool(prev.get("is_resumption"))
+        curr_is_resumption = bool(halt.get("is_resumption"))
+        if (not prev_is_resumption) and curr_is_resumption:
+            seen_halts[ek] = halt
             try:
                 send_halt_alert(halt, is_resumption=True)
             except Exception:
-                logger.exception("send_halt_alert failed for resumption %s", sid)
+                logger.exception("send_halt_alert failed for resumption %s", ek)
             was_code = prev.get("halt_code", "?")
             logger.info("[%s] RESUMED: %s — was %s", stamp, sym, was_code)
         else:
-            seen_halts[sid] = halt
+            seen_halts[ek] = halt
 
 
 def main() -> None:
